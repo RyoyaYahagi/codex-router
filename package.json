@@ -12,6 +12,7 @@
     "test": "node --test --test-timeout=600000 test/*.test.mjs"
   },
   "dependencies": {
+    "@github/copilot-sdk": "1.0.14",
     "proper-lockfile": "4.1.2",
     "undici": "8.10.2"
   },

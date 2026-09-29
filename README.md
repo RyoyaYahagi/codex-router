@@ -546,6 +546,31 @@ at [GitHub personal access tokens](https://github.com/settings/personal-access-t
 The router deliberately does not read or copy the official Copilot CLI's
 credential store.
 
+The router includes `GitHub Copilot / Auto` in the model list. Register the
+same fine-grained PAT with Copilot Requests permission used by this provider,
+then select **GitHub Copilot / Auto** in Codex; no individual model curation is
+needed for this entry. GitHub chooses the model for each turn. Copilot Free and
+Student accounts whose access is Auto-only can use it; the official Copilot
+CLI changelog documents that plan restriction, and GitHub says Auto selection
+is available across plans ([Auto model selection](https://docs.github.com/en/copilot/concepts/models/auto-model-selection),
+[Copilot CLI changelog](https://github.com/github/copilot-cli/blob/main/changelog.md)).
+
+Auto uses GitHub's Copilot SDK session runtime. The SDK exposes `model: "auto"`
+and communicates with the Copilot CLI runtime over JSON-RPC; it does not send
+`model: "auto"` to the direct Responses inference endpoint
+([Copilot SDK](https://github.com/github/copilot-sdk),
+[session Auto options](https://docs.github.com/en/copilot/how-tos/copilot-sdk/features/session-persistence)).
+The SDK runtime is isolated under the router's private state directory and gets
+the token already registered with Codex Router. The router does not read or
+copy the official Copilot CLI credential store. Set `CODEX_ROUTER_DEBUG=1` in
+the router service environment to log the selected model when the runtime
+reports it; the log contains the model ID, not the prompt or token.
+The SDK runtime's content capture telemetry is explicitly disabled. Auto does
+not silently fall back to a fixed model when session creation or routing fails.
+The current adapter accepts text, inline base64 images, and Responses function
+tools with `tool_choice` set to `auto` or `none`. Unsupported input or tool
+shapes fail explicitly rather than being dropped or widened.
+
 At request time the GitHub credential is validated through the Copilot account
 endpoint, which also selects the account's inference host. That host is accepted
 only when it is GitHub-owned. The tray reads the account's AI-credit or legacy

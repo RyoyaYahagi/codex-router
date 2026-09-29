@@ -111,6 +111,7 @@ test("provider registry exposes configured API and OAuth model families", () => 
       "deepseek/deepseek-v4-flash-vision-exp",
       "deepseek/deepseek-v4-pro",
       "deepseek/deepseek-v4.1-flash",
+      "github-copilot/auto",
       "grok-api/grok-4.5",
       "grok-api/grok-4.7",
       "grok-oauth/grok-4.5",
@@ -1152,10 +1153,10 @@ test("LiteLLM configuration is generated from every registry route", () => {
     rendered,
     /model: "openai\/responses\/opencode-go-responses-muse-spark-1-2-contributor"/,
   );
-  assert.equal(
-    MODELS.some((model) => model.provider === "github-copilot"),
-    false,
-    "Copilot stays catalog-only until account-visible models are curated",
+  assert.deepEqual(
+    MODELS.filter((model) => model.provider === "github-copilot").map((model) => model.slug),
+    ["github-copilot/auto"],
+    "Copilot publishes only the synthetic Auto route until account-visible models are curated",
   );
   assert.match(rendered, /model: "anthropic\/opencode-go-messages-minimax-m3"/);
   const lunaBlock = rendered.slice(

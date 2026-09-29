@@ -61,6 +61,7 @@ import {
   ensureFreshGitHubCopilotSession,
   githubCopilotRequestHeaders,
 } from "./github-copilot-session.mjs";
+import { githubCopilotAutoResponse } from "./github-copilot-auto.mjs";
 import {
   commandCodeRoute,
   isUpgradeRequired,
@@ -1996,23 +1997,41 @@ async function handleRequest(request, response) {
           signal: controller.signal,
           redirect: ["/embeddings", "/decisions"].includes(route) ? "error" : "follow",
         });
-        let attemptResponse = await sendAttempt();
+        let attemptResponse = normalized.provider.authProfile === "github-copilot" && normalized.model.upstreamModel === "auto"
+          ? await githubCopilotAutoResponse({
+              githubToken: apiKey,
+              payload: normalized.payload,
+              signal: controller.signal,
+            })
+          : await sendAttempt();
         // The source credential can still be valid when Copilot changes the
         // account's inference endpoint or short-lived routing token. Preserve
         // the existing same-key force-refresh contract inside each pool
         // attempt; only a second 401 proves this credential should be cooled
         // and the next pool entry tried.
-        if (normalized.provider.authProfile === "github-copilot" && attemptResponse.status === 401) {
+        if (
+          normalized.provider.authProfile === "github-copilot" &&
+          attemptResponse.status === 401
+        ) {
           await attemptResponse.body?.cancel().catch(() => undefined);
-          attemptSession = await upstreamSession(
-            normalized.provider,
-            attemptCredential,
-            normalized.payload,
-            { force: true },
-            normalized.endpoint,
-          );
-          attemptTarget = upstreamTarget(attemptSession, normalized, route, requestUrl.search);
-          attemptResponse = await sendAttempt();
+          if (normalized.model.upstreamModel === "auto") {
+            attemptResponse = await githubCopilotAutoResponse({
+              githubToken: attemptCredential.value,
+              payload: normalized.payload,
+              signal: controller.signal,
+              forceSession: true,
+            });
+          } else {
+            attemptSession = await upstreamSession(
+              normalized.provider,
+              attemptCredential,
+              normalized.payload,
+              { force: true },
+              normalized.endpoint,
+            );
+            attemptTarget = upstreamTarget(attemptSession, normalized, route, requestUrl.search);
+            attemptResponse = await sendAttempt();
+          }
         }
         if (!attemptResponse.ok) {
           const bodyText = (await readResponseBody(attemptResponse, {
@@ -2113,20 +2132,26 @@ async function handleRequest(request, response) {
       normalized.endpoint,
     );
     target = upstreamTarget(session, normalized, route, requestUrl.search);
-    upstream = await fetch(target, {
-      method: request.method,
-      headers: upstreamHeaders(
-        request.headers,
-        upstreamBody,
-        session.apiKey,
-        normalized.provider,
-        session.headers,
-        normalized.endpoint,
-      ),
-      body: upstreamBody,
-      signal: controller.signal,
-      redirect: ["/embeddings", "/decisions"].includes(route) ? "error" : "follow",
-    });
+    upstream = normalized.provider.authProfile === "github-copilot" && normalized.model.upstreamModel === "auto"
+      ? await githubCopilotAutoResponse({
+          githubToken: credential.value,
+          payload: normalized.payload,
+          signal: controller.signal,
+        })
+      : await fetch(target, {
+          method: request.method,
+          headers: upstreamHeaders(
+            request.headers,
+            upstreamBody,
+            session.apiKey,
+            normalized.provider,
+            session.headers,
+            normalized.endpoint,
+          ),
+          body: upstreamBody,
+          signal: controller.signal,
+          redirect: ["/embeddings", "/decisions"].includes(route) ? "error" : "follow",
+        });
     // Embeddings and Decisions can be billed even when the response never
     // reaches the caller. Select one pool credential above and record its
     // outcome, but do not replay the same input through another credential
@@ -2152,27 +2177,36 @@ async function handleRequest(request, response) {
     upstream.status === 401
   ) {
     await upstream.body?.cancel().catch(() => undefined);
-    session = await upstreamSession(
-      normalized.provider,
-      credential,
-      normalized.payload,
-      { force: true },
-      normalized.endpoint,
-    );
-    target = upstreamTarget(session, normalized, route, requestUrl.search);
-    upstream = await fetch(target, {
-      method: request.method,
-      headers: upstreamHeaders(
-        request.headers,
-        upstreamBody,
-        session.apiKey,
+    if (normalized.model.upstreamModel === "auto") {
+      upstream = await githubCopilotAutoResponse({
+        githubToken: credential.value,
+        payload: normalized.payload,
+        signal: controller.signal,
+        forceSession: true,
+      });
+    } else {
+      session = await upstreamSession(
         normalized.provider,
-        session.headers,
+        credential,
+        normalized.payload,
+        { force: true },
         normalized.endpoint,
-      ),
-      body: upstreamBody,
-      signal: controller.signal,
-    });
+      );
+      target = upstreamTarget(session, normalized, route, requestUrl.search);
+      upstream = await fetch(target, {
+        method: request.method,
+        headers: upstreamHeaders(
+          request.headers,
+          upstreamBody,
+          session.apiKey,
+          normalized.provider,
+          session.headers,
+          normalized.endpoint,
+        ),
+        body: upstreamBody,
+        signal: controller.signal,
+      });
+    }
   }
   // Falling back here is legal for the same reason the Copilot replay above
   // is: nothing has been relayed yet. The refusal is read rather than piped
